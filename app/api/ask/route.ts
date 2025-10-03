@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 
-export const runtime = "nodejs"; // ejecuta como función Node en Vercel
+export const runtime = "nodejs";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
 
-// Prompt de sistema
+// Orden de modelos a probar (primero el que te funcionó)
+const MODEL_CANDIDATES = [
+  "gemini-2.5-flash-preview-05-20", // el que ya te funcionó
+  "gemini-2.0-flash",
+  "gemini-1.5-flash-8b",
+  "gemini-1.5-pro",
+];
+
 const SYSTEM_PROMPT_ES = `
 Eres Xerena, IA oficial de FinalX. Respondes en el idioma del usuario (si pregunta en inglés, respondes en inglés), en 1–3 párrafos claros, tono directo, amable y futurista.
 
@@ -44,58 +51,77 @@ Usuario: "${question}"
 Xerena:
 `.trim();
 
-    const apiUrl =
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" +
-      GEMINI_API_KEY;
+    // intentamos modelos en orden
+    let lastErrorText = "";
+    for (const model of MODEL_CANDIDATES) {
+      const apiUrl =
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=` +
+        GEMINI_API_KEY;
 
-    const payload = {
-      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-    };
+      const payload = {
+        contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+      };
 
-    const r = await fetch(apiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      cache: "no-store",
-    });
+      const r = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        cache: "no-store",
+      });
 
-    if (!r.ok) {
-      const txt = await r.text().catch(() => "");
-      console.error("Gemini API error:", r.status, txt);
+      if (!r.ok) {
+        const txt = await r.text().catch(() => "");
+        lastErrorText = `(${r.status}) ${txt || "sin detalle"}`;
+
+        // si es 404/NOT_FOUND por modelo, probamos el siguiente
+        if (r.status === 404 || /NOT_FOUND/i.test(txt)) {
+          continue;
+        }
+        // para otros errores, salimos
+        return NextResponse.json(
+          {
+            error:
+              "El proveedor de IA devolvió un error " +
+              lastErrorText +
+              ". Revisa clave/cuotas o nombre del modelo.",
+          },
+          { status: 502 }
+        );
+      }
+
+      const data = (await r.json()) as any;
+      const answer =
+        data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+
+      if (answer) {
+        return NextResponse.json({ answer, modelUsed: model }, { status: 200 });
+      }
+
+      const feedback =
+        data?.promptFeedback?.safetyRatings ||
+        data?.candidates?.[0]?.safetyRatings ||
+        null;
+
+      // bloqueado por políticas: devolvemos el detalle
       return NextResponse.json(
         {
           error:
-            "El proveedor de IA devolvió un error (" +
-            r.status +
-            "). " +
-            (txt || "Revisa tu clave, cuotas o el nombre del modelo."),
+            "La respuesta fue bloqueada por las políticas del modelo." +
+            (feedback ? " Detalle: " + JSON.stringify(feedback) : ""),
+          modelUsed: model,
         },
-        { status: 502 }
+        { status: 200 }
       );
     }
 
-    const data = (await r.json()) as any;
-
-    const answer =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
-
-    if (answer) {
-      return NextResponse.json({ answer }, { status: 200 });
-    }
-
-    // Si no hubo candidatos (bloqueo por políticas o sin salida)
-    const feedback =
-      data?.promptFeedback?.safetyRatings ||
-      data?.candidates?.[0]?.safetyRatings ||
-      null;
-
+    // si ninguno funcionó
     return NextResponse.json(
       {
         error:
-          "La respuesta fue bloqueada por las políticas del modelo. " +
-          (feedback ? "Detalle: " + JSON.stringify(feedback) : ""),
+          "No fue posible generar respuesta con los modelos probados. Último error: " +
+          lastErrorText,
       },
-      { status: 200 } // 200 para que el cliente muestre el texto
+      { status: 502 }
     );
   } catch (e: any) {
     console.error("ask route error:", e);
@@ -106,7 +132,6 @@ Xerena:
   }
 }
 
-// GET para healthcheck
 export async function GET() {
   return NextResponse.json({ ok: true });
 }
