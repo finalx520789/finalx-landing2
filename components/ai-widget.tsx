@@ -11,36 +11,25 @@ export default function AIWidget() {
   const [error, setError] = useState("");
 
   const handleAsk = async () => {
-    if (!question.trim() || isLoading) return;
+    if (!question.trim()) return;
 
     setIsLoading(true);
     setError("");
     setAnswer("");
 
     try {
-      const res = await fetch("/api/ask", {
+      const response = await fetch("/api/ask", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question }),
       });
 
-      const text = await res.text();
-      let data: any = null;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        // si el servidor devolvió algo no-JSON, lo mostramos
-        throw new Error(`Respuesta no válida del servidor: ${text.slice(0, 300)}`);
-      }
+      if (!response.ok) throw new Error("Error al consultar la IA");
 
-      if (!res.ok) {
-        throw new Error(data?.error || `Error ${res.status}`);
-      }
-
-      setAnswer(String(data.answer || "").trim());
-    } catch (err: any) {
-      console.error(err);
-      setError(err?.message || "Error al conectar con la IA. Intenta de nuevo.");
+      const data = await response.json();
+      setAnswer(data.answer || "No se recibió respuesta");
+    } catch (err) {
+      setError("Error al conectar con la IA. Intenta de nuevo.");
     } finally {
       setIsLoading(false);
     }
@@ -48,19 +37,23 @@ export default function AIWidget() {
 
   return (
     <>
-      {/* FAB */}
+      {/* Botón flotante */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-[#FBBF24] rounded-full flex items-center justify-center shadow-lg hover:bg-[#FBBF24]/90 transition-all"
         aria-label="Pregunta a la IA"
       >
-        {isOpen ? <X className="w-6 h-6 text-[#0b0b0b]" /> : <MessageCircle className="w-6 h-6 text-[#0b0b0b]" />}
+        {isOpen ? (
+          <X className="w-6 h-6 text-[#0b0b0b]" />
+        ) : (
+          <MessageCircle className="w-6 h-6 text-[#0b0b0b]" />
+        )}
       </button>
 
       {/* Panel */}
       {isOpen && (
         <div className="fixed bottom-24 right-6 z-50 w-96 max-w-[calc(100vw-3rem)] bg-[#111] rounded-2xl border border-[#FBBF24]/30 shadow-2xl overflow-hidden">
-          {/* Header */}
+          {/* Encabezado */}
           <div className="bg-[#FBBF24]/10 px-6 py-4 border-b border-[#333]">
             <h3 className="font-bold text-lg flex items-center gap-2">
               <MessageCircle className="w-5 h-5 text-[#FBBF24]" />
@@ -68,8 +61,9 @@ export default function AIWidget() {
             </h3>
           </div>
 
-          {/* Content */}
+          {/* Contenido */}
           <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
+            {/* Input */}
             <div className="space-y-3">
               <textarea
                 value={question}
@@ -103,15 +97,19 @@ export default function AIWidget() {
               </button>
             </div>
 
+            {/* Respuesta */}
             {answer && (
               <div className="bg-[#1f1f1f] rounded-xl p-4 border border-[#333]">
                 <p
                   className="text-[#F3F4F6] text-sm leading-relaxed"
-                  dangerouslySetInnerHTML={{ __html: answer.replace(/\n/g, "<br/>") }}
+                  dangerouslySetInnerHTML={{
+                    __html: answer.replace(/\n/g, "<br>"),
+                  }}
                 />
               </div>
             )}
 
+            {/* Error */}
             {error && (
               <div className="bg-red-500/10 rounded-xl p-4 border border-red-500/30">
                 <p className="text-red-400 text-sm">{error}</p>
@@ -123,4 +121,3 @@ export default function AIWidget() {
     </>
   );
 }
-
