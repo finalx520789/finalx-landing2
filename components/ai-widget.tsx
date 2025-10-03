@@ -11,28 +11,36 @@ export default function AIWidget() {
   const [error, setError] = useState("");
 
   const handleAsk = async () => {
-    if (!question.trim()) return;
+    if (!question.trim() || isLoading) return;
 
     setIsLoading(true);
     setError("");
     setAnswer("");
 
     try {
-      const response = await fetch("/api/ask", {
+      const res = await fetch("/api/ask", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ question }),
       });
 
-      if (!response.ok) {
-        const msg = await response.text().catch(() => "");
-        throw new Error(msg || "Error al consultar la IA");
+      const text = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        // si el servidor devolvió algo no-JSON, lo mostramos
+        throw new Error(`Respuesta no válida del servidor: ${text.slice(0, 300)}`);
       }
 
-      const data = await response.json();
-      setAnswer(data.answer || "No se recibió respuesta");
-    } catch (err) {
-      setError("Error al conectar con la IA. Intenta de nuevo.");
+      if (!res.ok) {
+        throw new Error(data?.error || `Error ${res.status}`);
+      }
+
+      setAnswer(String(data.answer || "").trim());
+    } catch (err: any) {
+      console.error(err);
+      setError(err?.message || "Error al conectar con la IA. Intenta de nuevo.");
     } finally {
       setIsLoading(false);
     }
@@ -46,11 +54,7 @@ export default function AIWidget() {
         className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-[#FBBF24] rounded-full flex items-center justify-center shadow-lg hover:bg-[#FBBF24]/90 transition-all"
         aria-label="Pregunta a la IA"
       >
-        {isOpen ? (
-          <X className="w-6 h-6 text-[#0b0b0b]" />
-        ) : (
-          <MessageCircle className="w-6 h-6 text-[#0b0b0b]" />
-        )}
+        {isOpen ? <X className="w-6 h-6 text-[#0b0b0b]" /> : <MessageCircle className="w-6 h-6 text-[#0b0b0b]" />}
       </button>
 
       {/* Panel */}
@@ -66,7 +70,6 @@ export default function AIWidget() {
 
           {/* Content */}
           <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
-            {/* Input */}
             <div className="space-y-3">
               <textarea
                 value={question}
@@ -81,7 +84,6 @@ export default function AIWidget() {
                   }
                 }}
               />
-
               <button
                 onClick={handleAsk}
                 disabled={isLoading || !question.trim()}
@@ -101,17 +103,15 @@ export default function AIWidget() {
               </button>
             </div>
 
-            {/* Answer */}
             {answer && (
               <div className="bg-[#1f1f1f] rounded-xl p-4 border border-[#333]">
                 <p
                   className="text-[#F3F4F6] text-sm leading-relaxed"
-                  dangerouslySetInnerHTML={{ __html: answer }}
+                  dangerouslySetInnerHTML={{ __html: answer.replace(/\n/g, "<br/>") }}
                 />
               </div>
             )}
 
-            {/* Error */}
             {error && (
               <div className="bg-red-500/10 rounded-xl p-4 border border-red-500/30">
                 <p className="text-red-400 text-sm">{error}</p>
@@ -123,3 +123,4 @@ export default function AIWidget() {
     </>
   );
 }
+
