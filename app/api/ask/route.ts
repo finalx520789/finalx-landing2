@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export const runtime = "nodejs";          // Necesita Node runtime en Vercel
-export const dynamic = "force-dynamic";   // Evita cacheo del handler
-export const revalidate = 0;              // Sin ISR (si aplica)
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
@@ -27,10 +27,16 @@ Instrucciones:
 `;
 
 export async function GET() {
-  // Health-check sencillo (útil para probar desde el navegador)
   return NextResponse.json({
     ok: true,
     envHasKey: Boolean(GEMINI_API_KEY),
+  });
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: { "Access-Control-Allow-Methods": "POST,GET,OPTIONS" },
   });
 }
 
@@ -46,15 +52,13 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => null);
     const question = typeof body?.question === "string" ? body.question.trim() : "";
 
-    if (!question) {
-      return NextResponse.json({ error: "Pregunta vacía" }, { status: 400 });
-    }
+    if (!question) return NextResponse.json({ error: "Pregunta vacía" }, { status: 400 });
     if (!GEMINI_API_KEY) {
-      return NextResponse.json(
-        { error: "Falta GEMINI_API_KEY en el entorno" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Falta GEMINI_API_KEY en el entorno" }, { status: 500 });
     }
+
+    // Modelo ESTABLE (no preview)
+    const MODEL = "gemini-1.5-flash";
 
     const userPrompt = `
 ${SYSTEM_PROMPT_ES}
@@ -64,22 +68,24 @@ Xerena:
 `.trim();
 
     const apiUrl =
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=" +
+      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=` +
       GEMINI_API_KEY;
 
     const payload = {
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: userPrompt }],
-        },
-      ],
+      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
       generationConfig: {
         temperature: 0.5,
         topK: 40,
         topP: 0.9,
         maxOutputTokens: 512,
       },
+      // Hacemos los filtros menos bloqueantes (sin desactivar seguridad básica)
+      safetySettings: [
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+      ],
     };
 
     const r = await fetch(apiUrl, {
@@ -92,22 +98,36 @@ Xerena:
     if (!r.ok) {
       const txt = await r.text().catch(() => "");
       console.error("Gemini API error:", r.status, txt);
-      return NextResponse.json(
-        {
-          error: "Proveedor IA respondió con error",
-          status: r.status,
-          details: txt?.slice(0, 4000) ?? null,
-        },
-        { status: 502 }
-      );
+      let msg = "Proveedor IA respondió con error";
+      if (r.status === 429) msg = "Límite de uso alcanzado. Intenta en unos minutos.";
+      return NextResponse.json({ error: msg, status: r.status }, { status: 502 });
     }
 
     const data = (await r.json()) as any;
-    const answer: string =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
-      "No pude generar una respuesta en este momento.";
 
-    return NextResponse.json({ answer }, { status: 200 });
+    // Si el modelo bloquea o no devuelve texto, tratamos de detectar motivo:
+    const candidate = data?.candidates?.[0];
+    const parts = candidate?.content?.parts || [];
+    const text = parts.map((p: any) => p?.text).filter(Boolean).join("\n").trim();
+
+    const finishReason = candidate?.finishReason; // e.g. "STOP", "SAFETY", "OTHER"
+    if (!text) {
+      if (finishReason && finishReason !== "STOP") {
+        return NextResponse.json(
+          {
+            error:
+              "El modelo bloqueó la respuesta por políticas de seguridad. Reformula la pregunta de forma neutral (p. ej., “¿Cómo participo en el sorteo?”).",
+          },
+          { status: 200 }
+        );
+      }
+      return NextResponse.json(
+        { error: "No pude generar una respuesta en este momento. Intenta de nuevo." },
+        { status: 200 }
+      );
+    }
+
+    return NextResponse.json({ answer: text }, { status: 200 });
   } catch (e: any) {
     console.error("ask route error:", e);
     return NextResponse.json(
@@ -117,10 +137,3 @@ Xerena:
   }
 }
 
-// (Opcional) si te hacen preflight desde algún cliente raro
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: { "Access-Control-Allow-Methods": "POST,GET,OPTIONS" },
-  });
-}
