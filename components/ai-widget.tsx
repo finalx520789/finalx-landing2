@@ -18,18 +18,31 @@ export default function AIWidget() {
     setAnswer("");
 
     try {
-      const response = await fetch("/api/ask", {
+      const res = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question }),
       });
 
-      if (!response.ok) throw new Error("Error al consultar la IA");
+      const data = await res.json().catch(() => ({}));
 
-      const data = await response.json();
-      setAnswer(data.answer || "No se recibió respuesta");
-    } catch (err) {
-      setError("Error al conectar con la IA. Intenta de nuevo.");
+      if (!res.ok) {
+        throw new Error(
+          data?.error ||
+            `Error ${res.status} al consultar la IA. Intenta de nuevo.`
+        );
+      }
+
+      // el servidor puede devolver {answer} o {error} (bloqueo por políticas)
+      if (data?.answer) {
+        setAnswer(String(data.answer));
+      } else if (data?.error) {
+        setError(String(data.error));
+      } else {
+        setError("No se recibió respuesta de la IA.");
+      }
+    } catch (err: any) {
+      setError(err?.message || "Error al conectar con la IA.");
     } finally {
       setIsLoading(false);
     }
@@ -63,7 +76,6 @@ export default function AIWidget() {
 
           {/* Contenido */}
           <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
-            {/* Input */}
             <div className="space-y-3">
               <textarea
                 value={question}
@@ -78,6 +90,7 @@ export default function AIWidget() {
                   }
                 }}
               />
+
               <button
                 onClick={handleAsk}
                 disabled={isLoading || !question.trim()}
@@ -97,19 +110,17 @@ export default function AIWidget() {
               </button>
             </div>
 
-            {/* Respuesta */}
             {answer && (
               <div className="bg-[#1f1f1f] rounded-xl p-4 border border-[#333]">
                 <p
                   className="text-[#F3F4F6] text-sm leading-relaxed"
                   dangerouslySetInnerHTML={{
-                    __html: answer.replace(/\n/g, "<br>"),
+                    __html: String(answer).replace(/\n/g, "<br>"),
                   }}
                 />
               </div>
             )}
 
-            {/* Error */}
             {error && (
               <div className="bg-red-500/10 rounded-xl p-4 border border-red-500/30">
                 <p className="text-red-400 text-sm">{error}</p>
