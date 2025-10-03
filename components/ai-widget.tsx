@@ -1,46 +1,52 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { MessageCircle, X, Send, Loader2 } from "lucide-react"
+import { useState } from "react";
+import { MessageCircle, X, Send, Loader2 } from "lucide-react";
+
+type LinkCTA = { label: string; url: string };
+type AnswerPayload = { text: string; links?: LinkCTA[] };
 
 export default function AIWidget() {
-  const [isOpen, setIsOpen] = useState(false)
-  const [question, setQuestion] = useState("")
-  const [answer, setAnswer] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [isOpen, setIsOpen] = useState(false);
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState<AnswerPayload | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleAsk = async () => {
-    if (!question.trim()) return
+    if (!question.trim()) return;
 
-    setIsLoading(true)
-    setError("")
-    setAnswer("")
+    setIsLoading(true);
+    setError("");
+    setAnswer(null);
 
     try {
       const response = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question }),
-      })
+      });
 
-      if (!response.ok) throw new Error("Error al consultar la IA")
+      if (!response.ok) throw new Error("Error al consultar la IA");
 
-      const data = await response.json()
-      setAnswer(data.answer || "No se recibió respuesta")
-    } catch (err) {
-      setError("Error al conectar con la IA. Intenta de nuevo.")
+      const data = await response.json();
+      setAnswer({
+        text: (data.answer || "No se recibió respuesta") as string,
+        links: Array.isArray(data.links) ? data.links : [],
+      });
+    } catch {
+      setError("Error al conectar con la IA. Intenta de nuevo.");
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   return (
     <>
       {/* FAB Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-[#FBBF24] rounded-full flex items-center justify-center shadow-lg hover:bg-[#FBBF24]/90 transition-all glow-gold"
+        className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-[#FBBF24] rounded-full flex items-center justify-center shadow-lg hover:bg-[#FBBF24]/90 transition-all"
         aria-label="Pregunta a la IA"
       >
         {isOpen ? <X className="w-6 h-6 text-[#0b0b0b]" /> : <MessageCircle className="w-6 h-6 text-[#0b0b0b]" />}
@@ -69,8 +75,8 @@ export default function AIWidget() {
                 rows={3}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault()
-                    handleAsk()
+                    e.preventDefault();
+                    handleAsk();
                   }
                 }}
               />
@@ -94,12 +100,27 @@ export default function AIWidget() {
             </div>
 
             {/* Answer */}
-            {answer && (
+            {answer?.text && (
               <div className="bg-[#1f1f1f] rounded-xl p-4 border border-[#333]">
                 <p
                   className="text-[#F3F4F6] text-sm leading-relaxed"
-                  dangerouslySetInnerHTML={{ __html: answer.replace(/\n/g, "<br>") }}
+                  dangerouslySetInnerHTML={{ __html: answer.text.replace(/\n/g, "<br>") }}
                 />
+                {Array.isArray(answer.links) && answer.links.length > 0 && (
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {answer.links.map((l, i) => (
+                      <a
+                        key={`${l.url}-${i}`}
+                        href={l.url}
+                        target={l.url.startsWith("http") ? "_blank" : "_self"}
+                        rel="noopener noreferrer"
+                        className="w-full px-4 py-3 bg-[#FBBF24] text-[#0b0b0b] rounded-xl font-semibold text-center hover:bg-[#FBBF24]/90 transition"
+                      >
+                        {l.label}
+                      </a>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -113,5 +134,5 @@ export default function AIWidget() {
         </div>
       )}
     </>
-  )
+  );
 }
