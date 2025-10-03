@@ -1,104 +1,85 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-export const runtime = "nodejs"; // usar runtime Node en Vercel
+export const runtime = "nodejs";          // Necesita Node runtime en Vercel
+export const dynamic = "force-dynamic";   // Evita cacheo del handler
+export const revalidate = 0;              // Sin ISR (si aplica)
 
-// PON TU API KEY EN VERCEL: Settings → Environment Variables → GEMINI_API_KEY
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
-const MODEL = "gemini-1.5-flash"; // estable y rápido
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// GET opcional solo para verificación rápida (devolverá 200)
-export async function GET() {
-  return NextResponse.json({ ok: true });
-}
-
-/**
- * Sistema/Contexto:
- * - Responde en el idioma del usuario (auto).
- * - Tono directo, amable y futurista (Xerena).
- * - Incluye enlaces ÚNICAMENTE permitidos abajo.
- */
-const SYSTEM_PROMPT = `
-Eres “Xerena”, IA oficial de FinalX. Responde en el mismo idioma del usuario, en 1–3 párrafos claros, tono directo, amable y futurista.
+// — Prompt de sistema —
+const SYSTEM_PROMPT_ES = `
+Eres Xerena, IA oficial de FinalX. Respondes en español (o en el idioma del usuario), en 1–3 párrafos claros, tono directo, amable y futurista.
 
 Reglas:
-- No das asesoría financiera, legal o médica. Si te lo piden, recuérdalo y remite a Términos y Condiciones y Política de Privacidad del sitio.
+- No das asesoría financiera, legal o médica. Si te lo piden, recuérdalo y remite a Términos y Condiciones.
 - Tokens FNX: token de utilidad por participación; no es inversión. No prometer rentabilidad.
 - Nodos FinalX: compra voluntaria con riesgo; precio escalable; ingresos del ecosistema sin garantías. Remite a T&C.
 - Sorteos: gestionados con SweepWidget; acciones = tickets; Top 10 semanal con premios $50–$100; sorteo principal iPhone 17 Pro Max. Tickets no ganadores → puntos para Airdrop FNX.
-- Entrega de premios: ganador anunciado públicamente; debe presentarse en vivo máx. 15 días; entrega máx. 30 días.
+- Entrega: ganador anunciado públicamente; debe presentarse en vivo en máx. 15 días; entrega en máx. 30 días.
 - Menores: si gana un menor, entrega solo vía padre/madre/tutor legal.
-- Si hay dudas de cumplimiento: remite a T&C y Privacidad.
+- Dudas legales o de privacidad: remite a Términos y Condiciones y Política de Privacidad.
+- Contacto: contacto@finalx.app (general), soporte@finalx.app (soporte), rewards@finalx.app (premios).
 
-Enlaces permitidos (solamente estos):
-- Sorteo (SweepWidget): https://sweepwidget.com/c/93877-y45qrt8o
-- Web FinalX: https://finalx.app
-- Contacto: contacto@finalx.app (general), soporte@finalx.app (soporte), rewards@finalx.app (premios)
-
-Cuando sugieras enlaces, usa etiquetas HTML <a href="..." target="_blank" rel="noopener noreferrer">Texto</a>.
-Evita enlaces distintos a los permitidos. Si te piden otros, explica que no puedes enlazarlos y ofrece alternativas seguras.
+Instrucciones:
+- Sé específico con pasos (seguir IG/X, comentar post fijado, invitar amigos con link, usar #FinalXLive).
+- Ofrece CTA útiles (ej. “Participa aquí: https://finalx.app/sorteo”), y si preguntan por el widget: https://sweepwidget.com/c/93877-y45qrt8o
+- Si no sabes algo, dilo y sugiere leer T&C. Evita consejos financieros.
 `;
 
-// Sanitiza la respuesta para permitir sólo algunos <a> y <br>
-function sanitizeToHtml(text: string) {
-  // Permitimos break lines y anchors con target/rel forzados
-  const withBreaks = text.replace(/\n/g, "<br>");
-  // Convierte URLs permitidas en <a> seguro (por si el modelo devuelve texto “limpio”)
-  const allow = [
-    "https://sweepwidget.com/c/93877-y45qrt8o",
-    "https://finalx.app",
-  ];
-  let html = withBreaks;
-
-  for (const url of allow) {
-    const re = new RegExp(url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
-    html = html.replace(
-      re,
-      `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`
-    );
-  }
-
-  // Si el modelo ya envió <a ...>, dejamos pasar pero reforzamos target/rel
-  html = html.replace(
-    /<a\s+([^>]*href="https?:\/\/[^"]+"[^>]*)>/gi,
-    (m, attrs) => {
-      // Sólo permitimos si tiene alguno de los dominios permitidos
-      if (!/(sweepwidget\.com|finalx\.app)/i.test(attrs)) return ""; // lo quitamos
-      // Aseguramos target/rel
-      let safe = attrs
-        .replace(/\s*target="[^"]*"/i, "")
-        .replace(/\s*rel="[^"]*"/i, "");
-      safe += ` target="_blank" rel="noopener noreferrer"`;
-      return `<a ${safe}>`;
-    }
-  );
-
-  return html;
+export async function GET() {
+  // Health-check sencillo (útil para probar desde el navegador)
+  return NextResponse.json({
+    ok: true,
+    envHasKey: Boolean(GEMINI_API_KEY),
+  });
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const { question } = (await req.json()) as { question?: string };
+    if (req.headers.get("content-type")?.includes("application/json") !== true) {
+      return NextResponse.json(
+        { error: "Content-Type debe ser application/json" },
+        { status: 415 }
+      );
+    }
 
-    if (!question || typeof question !== "string" || !question.trim()) {
+    const body = await req.json().catch(() => null);
+    const question = typeof body?.question === "string" ? body.question.trim() : "";
+
+    if (!question) {
       return NextResponse.json({ error: "Pregunta vacía" }, { status: 400 });
     }
     if (!GEMINI_API_KEY) {
-      return NextResponse.json({ error: "Falta GEMINI_API_KEY" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Falta GEMINI_API_KEY en el entorno" },
+        { status: 500 }
+      );
     }
 
     const userPrompt = `
-${SYSTEM_PROMPT}
+${SYSTEM_PROMPT_ES}
 
-Usuario: "${question.trim()}"
+Usuario: "${question}"
 Xerena:
 `.trim();
 
     const apiUrl =
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=" +
+      GEMINI_API_KEY;
 
     const payload = {
-      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-      // Puedes añadir safetySettings si tu cuenta lo requiere
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: userPrompt }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.5,
+        topK: 40,
+        topP: 0.9,
+        maxOutputTokens: 512,
+      },
     };
 
     const r = await fetch(apiUrl, {
@@ -111,18 +92,35 @@ Xerena:
     if (!r.ok) {
       const txt = await r.text().catch(() => "");
       console.error("Gemini API error:", r.status, txt);
-      return NextResponse.json({ error: "Error con el proveedor de IA" }, { status: 502 });
+      return NextResponse.json(
+        {
+          error: "Proveedor IA respondió con error",
+          status: r.status,
+          details: txt?.slice(0, 4000) ?? null,
+        },
+        { status: 502 }
+      );
     }
 
     const data = (await r.json()) as any;
-    const raw =
+    const answer: string =
       data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
       "No pude generar una respuesta en este momento.";
 
-    const answer = sanitizeToHtml(raw);
     return NextResponse.json({ answer }, { status: 200 });
-  } catch (e) {
+  } catch (e: any) {
     console.error("ask route error:", e);
-    return NextResponse.json({ error: "Error interno" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || "Error interno del servidor" },
+      { status: 500 }
+    );
   }
+}
+
+// (Opcional) si te hacen preflight desde algún cliente raro
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: { "Access-Control-Allow-Methods": "POST,GET,OPTIONS" },
+  });
 }
