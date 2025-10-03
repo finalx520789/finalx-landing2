@@ -1,4 +1,4 @@
-"use client";
+        "use client";
 
 import { useState } from "react";
 import { MessageCircle, X, Send, Loader2 } from "lucide-react";
@@ -33,7 +33,6 @@ export default function AIWidget() {
         );
       }
 
-      // el servidor puede devolver {answer} o {error} (bloqueo por políticas)
       if (data?.answer) {
         setAnswer(String(data.answer));
       } else if (data?.error) {
@@ -50,7 +49,6 @@ export default function AIWidget() {
 
   return (
     <>
-      {/* Botón flotante */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-[#FBBF24] rounded-full flex items-center justify-center shadow-lg hover:bg-[#FBBF24]/90 transition-all"
@@ -63,10 +61,8 @@ export default function AIWidget() {
         )}
       </button>
 
-      {/* Panel */}
       {isOpen && (
         <div className="fixed bottom-24 right-6 z-50 w-96 max-w-[calc(100vw-3rem)] bg-[#111] rounded-2xl border border-[#FBBF24]/30 shadow-2xl overflow-hidden">
-          {/* Encabezado */}
           <div className="bg-[#FBBF24]/10 px-6 py-4 border-b border-[#333]">
             <h3 className="font-bold text-lg flex items-center gap-2">
               <MessageCircle className="w-5 h-5 text-[#FBBF24]" />
@@ -74,7 +70,6 @@ export default function AIWidget() {
             </h3>
           </div>
 
-          {/* Contenido */}
           <div className="p-6 space-y-4 max-h-96 overflow-y-auto">
             <div className="space-y-3">
               <textarea
@@ -132,3 +127,4 @@ export default function AIWidget() {
     </>
   );
 }
+    
